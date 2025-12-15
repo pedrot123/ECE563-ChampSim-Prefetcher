@@ -1,0 +1,9 @@
+/traces
+/obj
+/bin
+/bin_
+/config_
+/objHidden
+/vcpkg_
+/vcpkg_installed_
+.csconfig

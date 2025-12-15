@@ -1,0 +1,96 @@
+#include <array>
+#include <cstdio>
+#include <cstdlib>//for llabs()
+#include "champsim.h"
+#include "cache.h"
+
+extern CACHE L2C;//level-2 cache
+//stride-based prefetching information
+struct StrideEntry {
+    uint64_t last_claddr{0};
+    int64_t  stride{0};
+    uint8_t  confidence{0};
+    bool     valid{false};
+};
+static std::array<StrideEntry, 4096> stride_table;
+constexpr uint64_t TABLE_MASK = 4095;
+
+//Parameter list
+constexpr int NEXT_LINE_DEGREE = 1;//in next-line prefetching, how many lines ahead (for perlbench, only 1)
+constexpr uint8_t CONFIDENCE_THRESHOLD = 96;//confidence needed  for stride prefetcher (percent)
+constexpr uint8_t CONFIDENCE_INCREMENT = 6;//amount confidence increases upon correct prediction
+constexpr uint8_t CONFIDENCE_DECREMENT = 38;//amount confidence decreases upon false prediction
+constexpr int MAX_STRIDE_PREFETCH_DEGREE = 1;//number of prefetches for small or noisy strides
+constexpr int AGGRESSIVE_MODE_STRIDE_THRESHOLD = 8;//used to distinguish noise from real arrays
+constexpr int AGGRESSIVE_DEGREE = 64;//in agressive mode, it can go up to 64 lines ahead
+
+void CACHE::l2c_prefetcher_initialize()//ensures clean prefetcher
+{
+    printf("[AdaptiveStride+NLine] - configured with 4096 entries\n");
+    stride_table.fill(StrideEntry{});
+}
+
+uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t, uint8_t, uint32_t metadata_in)
+{//takes in the memory address, and program counters (two empty variables and metadata were also needed)
+    uint64_t cl_addr=addr>>LOG2_BLOCK_SIZE;//shifts memory address right to turn bytes addr into cache line addr(e.g. 6 for 64)
+    //NEXT-LINE PREFETCHING (Note: cl means cache line)
+    for (int i = 1; i <= NEXT_LINE_DEGREE; ++i) {
+        uint64_t target_cl = cl_addr + i;//finds target cache line
+        if ((target_cl >> (12 - LOG2_BLOCK_SIZE)) != (cl_addr >> (12 - LOG2_BLOCK_SIZE)))
+            break;//to prevent prefetching across page boundaries
+        uint64_t pf_addr = target_cl << LOG2_BLOCK_SIZE;//convert back into byte address
+        this->prefetch_line(ip, addr, pf_addr, FILL_L2, metadata_in);//call the cache's prefetcher function
+    }
+
+    //STRIDE PREFETCHING
+    auto& e = stride_table[(ip >> 2) & TABLE_MASK];//picks entry e based on instruction pointer ip
+
+    if (e.valid) {
+        int64_t observed = (int64_t)cl_addr - (int64_t)e.last_claddr;//find observed stride
+
+        if (observed == e.stride && observed != 0) {//if observed stride matched stored stride
+            //If correct, make a slow confidence gain
+            e.confidence = (e.confidence > 100 - CONFIDENCE_INCREMENT) ? 100 : e.confidence + CONFIDENCE_INCREMENT;
+	    //If high confidence, use agressive mode
+            if (e.confidence >= CONFIDENCE_THRESHOLD) {
+                int degree = (llabs(e.stride) >= AGGRESSIVE_MODE_STRIDE_THRESHOLD)
+                             ? AGGRESSIVE_DEGREE           //large strides have large prefetches
+                             : MAX_STRIDE_PREFETCH_DEGREE; //small/noisy strides stay small
+
+                for (int i = 1; i <= degree; ++i) {//iterates over the chosen degree
+                    uint64_t target_cl = cl_addr + i * observed;//find next predicted cache line
+                    if ((target_cl >> (12 - LOG2_BLOCK_SIZE)) != (cl_addr >> (12 - LOG2_BLOCK_SIZE)))
+                        break;//to prevent prefetching across page boundaries 
+                    uint64_t pf_addr = target_cl << LOG2_BLOCK_SIZE;//convert back into byte address
+                    this->prefetch_line(ip, addr, pf_addr, FILL_L2, metadata_in);//call the cache's prefetcher function
+                }
+            }
+        }
+        else {
+            //If a false prediction is given, there is a penalty
+            e.confidence = (e.confidence < CONFIDENCE_DECREMENT) ? 0 : e.confidence - CONFIDENCE_DECREMENT;
+            if (observed != 0)
+                e.stride = observed;//update stride
+        }
+    }
+    else {
+        e.valid = true;//if the stride entry was invalid before, mark it as valid
+    }
+
+    e.last_claddr = cl_addr;//update last cache line
+    return metadata_in;
+}
+
+// called when a cache line is filled
+uint32_t CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set,
+                                          uint32_t way, uint8_t prefetch,
+                                          uint64_t evicted_addr,
+                                          uint32_t metadata_in)
+{
+    return metadata_in;
+}
+
+void CACHE::l2c_prefetcher_final_stats()
+{
+    // no custom stats
+}

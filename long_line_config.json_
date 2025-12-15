@@ -1,0 +1,16 @@
+{
+  "branch": "bimodal",
+  "l1i_prefetcher": "no",
+  "l1d_prefetcher": "long_line",
+  "l2c_prefetcher": "no",
+  "llc_replacement": "lru",
+  "cores": 1,
+  "l1i_sets": 2048,
+  "l1i_ways": 4,
+  "l1d_sets": 2048,
+  "l1d_ways": 6,
+  "l2c_sets": 2048,
+  "l2c_ways": 8,
+  "llc_sets": 8192,
+  "llc_ways": 11
+}
