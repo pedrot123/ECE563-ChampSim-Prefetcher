@@ -1,4 +1,4 @@
- ECE563-ChampSim-Prefetcher
+ # ECE563-ChampSim-Prefetcher
   Source code for our adaptive prefetcher project. Build upon the [IPC1 branch of ChampSim](https://github.com/ChampSim/ChampSim/releases/tag/IPC). The main file of interest is `/prefetcher/adaptive_stride_nline.l2c_pref`. 
   
   To run:
