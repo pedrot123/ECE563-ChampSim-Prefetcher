@@ -92,5 +92,41 @@ uint32_t CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set,
 
 void CACHE::l2c_prefetcher_final_stats()
 {
-    // no custom stats
+    uint64_t sim_misses = 0;
+    
+    // ChampSim tracks misses per CPU and per request type (LOAD, RFO, WRITEBACK, PREFETCH)
+    // Need to accumulate demand misses across all cores (LOAD or RFO, the demand misses)
+    for (int i = 0; i < NUM_CPUS; ++i) {
+        for (int j = 0; j < NUM_TYPES; ++j) {
+            if (j != PREFETCH && j != WRITEBACK) {
+                sim_misses += sim_miss[i][j];
+            }
+        }
+    }
+
+    // Baseline misses = pf_useful + sim_misses
+    uint64_t baseline_misses  = pf_useful + sim_misses;
+
+    printf("\n[L2C Prefetcher Final Stats]\n");
+
+    if (pf_issued > 0) {
+        // ACCURACY
+        double accuracy = ((double)pf_useful / pf_issued) * 100;
+        printf("  Accuracy: %.4f (Useful: %llu / Issued: %llu)\n", accuracy, pf_useful, pf_issued);
+        
+        // POLLUTION RATE
+        uint64_t pf_polluted = pf_issued - pf_useful;
+        double pollution_rate = ((double)pf_polluted / pf_issued) * 100;
+        printf("  Pollution Rate: %.4f (Polluted: %llu / Issued: %llu)\n", pollution_rate, pf_polluted, pf_issued);
+    } else {
+        printf("  No prefetches were issued.\n");
+    }
+
+    if (baseline_misses > 0) {
+        // COVERAGE
+        double coverage = ((double)pf_useful / baseline_misses) * 100;
+        printf("  Coverage: %.4f (Useful: %llu / Total Misses: %llu)\n", coverage, pf_useful, baseline_misses);
+    } else {
+        printf("  No misses were observed.\n");
+    }
 }
